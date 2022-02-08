@@ -7,7 +7,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
       
       
       sliderInput("week.test", "Current Week:",
-                  min=(n.weeks.train+1), max=nrow(ds), value=(n.weeks.train+1), step=1),
+                  min=(n.weeks.train+15), max=nrow(ds), value=(n.weeks.train+15), step=1),
       sliderInput("set.thresh", "Threshold for alarm (default=5):",
                   min=3, max=10, value=5),
       selectInput('adjust.season', 'Adjust seasonality?', selected='1 seasonal term', choices=c('No adjustment', '1 seasonal term', '2 seasonal terms')  ),
@@ -32,7 +32,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
           alpha=NULL,
           mu0=list( trend=input$adjust.trend, #Trend adjustment?
                     S=season.adjust) #Seasonality? 0=no, 1 or 2 = # harmonics to include
-        ))}else{
+         )) }else{
           mod1<- algo.glrnb(surv.ds1,control=list(
             range=c(n.weeks.train:input$week.test),
             c.ARL=input$set.thresh,
@@ -42,6 +42,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
             mu0=list( trend=input$adjust.trend, #Trend adjustment?
                       S=season.adjust) #Seasonality? 0=no, 1 or 2 = # harmonics to include
           ))
+      }
         
         glr.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$upperbound[,1] )
         m.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$control$mu0 )

@@ -170,7 +170,8 @@ p1
 ```
 
 
-## Now let's test this out in the surveillance package
+## Now let's test out our detection algorithms in the surveillance package
+
 Need to determine the year and week of the first data Can use week(date) and year(date) functions to do this
 
 ```{r}
@@ -185,23 +186,15 @@ Let's look for aberrations during the 2007 calendar years first, then see how it
 
 Let's try historical limits with default threshold
 
-QUESTIONS to consider
-1. What happens if use adjust alpha up or down?
-2. What happens if you include fewer or more 4 week periods on either side?
-
 
 ```{r}
 app.hist.limit(ds=d5, datevar='week.date', casevar='a00_a09')
 
 ```
 
-
-Let's try Farrington method, with and without down-weighting past epidemics
 QUESTIONS to consider
-1. There is a drop in cases apparent in the data in the last couple of years. How does this affect the algorithms?
-2. How important is the reweighting option for the Farrington algorithm?
-3. What happens if use more or fewer years of histrical data for Farrington?
-
+1. What happens if use adjust alpha up or down?
+2. What happens if you include fewer or more 4 week periods on either side?
 
 
 ```{r hist.limits2}
@@ -216,9 +209,23 @@ QUESTIONS to consider
 
 
 ## Control chart methods
+QUESTIONS to consider
+
+- What are the issues with the ft of the model/
+- What if you add additional seasonal (Fourier) terms?
+- What if you use a negative binomial threshold model to calculate the likelihood ratio?
+- How would you set the threshold here?
+
+-- How might we further improve this approach?
 
 ```{r}
 glrpois_App(ds=d5, datevar='week.date', casevar='a00_a09', n.weeks.train=53)
+
+```
+
+Try to use a longer training period (used to fit seasonal component, trend, and estimate dispersion parameter for negative binomial model)
+```{r}
+glrpois_App(ds=d5, datevar='week.date', casevar='a00_a09', n.weeks.train=106)
 
 ```
 
