@@ -78,4 +78,3 @@ app.hist.limit <-function(ds=ds1, datevar='date', casevar='cases'){
   }
 )
 }
-d2

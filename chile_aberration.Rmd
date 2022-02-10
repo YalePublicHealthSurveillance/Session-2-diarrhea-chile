@@ -101,7 +101,7 @@ Now create flags for diarrheal disease codes (A00-A09)
 ```{r}
 d1$a00_a09 <- 0 #Initialize variables
 
-#Replace with 1 if the 3 digit ICD10 dx1 is J12,J13,J14,J15,J16,J17,J18 (note there are more efficient ways to code this using greater than and less than symbols)
+#Replace with 1 if the 3 digit ICD10 dx1 is A00, A01, A02, A03 (note there are more efficient ways to code this using greater than and less than symbols)
 
 d1$a00_a09[icd10.3digits %in% c('A00', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08', 'A09') ] <- 1
 ```
@@ -112,13 +112,13 @@ table(d1$a00_a09, d1$diag1)
 ```
 
 ## Let's aggregate the A00-A09 codes by week.date
--We sum the 0/1 variable we created for J12_J18 by date. this counts the number of cases per time period. Here we are using 'pipes'
+-We sum the 0/1 variable we created for A00-A09 by date. this counts the number of cases per time period. Here we are using 'pipes'
 
 ```{r}
 
 d2 <- d1 %>% #creating a new data frame called 'd2', input data frame d1
     group_by(week.date) %>%    #group by date
-    summarize('a00_a09' = sum(a00_a09) ) %>% #take the sum of j12_18 across all values of the data
+    summarize('a00_a09' = sum(a00_a09) ) %>% #take the sum of a00_A09 across all values of the data
     ungroup  
 ```
 
