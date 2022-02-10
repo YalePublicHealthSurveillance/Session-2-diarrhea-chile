@@ -71,10 +71,11 @@ app.hist.limit <-function(ds=ds1, datevar='date', casevar='cases'){
       col.select<-c('white', 'blue', 'black','red')
       plot.upCI <- c(rep(NA, times=(input$week.test-1)) , upCI)
       plot(ds[,datevar],all.agg, type='p', pch=16, col=col.select[col.vec], bty='l', main='Black=comparison periods, purple=threshold')
-      points(ds[1: length(plot.upCI),datevar],plot.upCI, type='p', cex=3,col='purple', pch="-")
+      points(ds[(1:length(plot.upCI)),datevar],plot.upCI, type='p', cex=3,col='purple', pch="-")
       points(ds[,datevar],all.agg ,type='l', col='gray')
       
     },width = "auto", height = "auto")
   }
 )
 }
+d2

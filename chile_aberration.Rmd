@@ -18,6 +18,8 @@ library(surveillance)
 library(lubridate)
 library(ggplot2)
 library(shiny)
+library(tidyr)
+library(dplyr)
 library(zoo)
 
 source('./R/App_Hist_limit.R')
@@ -93,81 +95,60 @@ icd10.3digits[1:10] #view first 10
 Look at their frequency
 ```{r}
 sort(table(icd10.3digits),decreasing=T)
-
 ```
 
 Now create flags for diarrheal disease codes (A00-A09)
 ```{r}
-#Initialize variables
-d1$a00_a09<-rep(0, nrow(d1))
-d1$a00_a09[icd10.3digits %in% c('A00', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08', 'A09') ]<-1
+d1$a00_a09 <- 0 #Initialize variables
+
+#Replace with 1 if the 3 digit ICD10 dx1 is J12,J13,J14,J15,J16,J17,J18 (note there are more efficient ways to code this using greater than and less than symbols)
+
+d1$a00_a09[icd10.3digits %in% c('A00', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06', 'A07', 'A08', 'A09') ] <- 1
 ```
 
 #Check your work
 ```{r}
-table(d1$a00_a09, d1$diag1) 
+table(d1$a00_a09, d1$diag1)
 ```
 
 ## Let's aggregate the A00-A09 codes by week.date
+-We sum the 0/1 variable we created for J12_J18 by date. this counts the number of cases per time period. Here we are using 'pipes'
 
 ```{r}
 
-d2<-aggregate(d1[,'a00_a09'],  #which variable(s) do you want to aggregate?
-              by=list('week.date'=d1$week.date),  #by which variable(s) do you want to aggregate?
-              FUN=sum) #function you want to use (you could also take mean by week if you wanted)
-
-names(d2)<-c('week.date','a00_a09') #renames the columns
+d2 <- d1 %>% #creating a new data frame called 'd2', input data frame d1
+    group_by(week.date) %>%    #group by date
+    summarize('a00_a09' = sum(a00_a09) ) %>% #take the sum of j12_18 across all values of the data
+    ungroup  
 ```
 
-It is  important to make sure that the time series is 'filled'--if there are weeks with 0 counts, it needs to be represented in the time series. to do this, let's make a vector of week.dates and see if it is of the length as our data
+It is important to ensure that all weeks are represented in the dataset, even if there are 0 counts. This can be done using the complete() function. This could be modified if there are multiple groups.  For example:
+
+  tidyr::complete(**agec**, week.date=seq.Date(min(week.date, na.rm=T), max(week.date, na.rm=T), 'week'), fill=list(a00_a09=0)) #fills 0s
+
 ```{r}
-dates<- d2$week.date
-date.seq <- seq.Date(from=dates[1], to=dates[length(dates)], by='week') #create a sequence from first to last week date
-length(dates)==length(date.seq) #test if the time series is complete
-```
+d2<- d2 %>%
+  tidyr::complete(week.date=seq.Date(min(week.date, na.rm=T), max(week.date, na.rm=T), 'week'), fill=list(a00_a09=0)) #fills 0s
 
-OK, so we have all week represented. If this was FALSE (some weeks were not represented), we would need to fill it. An easy way to do this is to create another dataframe that has all dates represented (and if you have multiple age groups, would have all dates for all age groups represented). Then merge that back in with your original data
-```{r}
-#data frame 1 has just the time series with all weeks represented 
-date.seq<-as.data.frame(date.seq)
-names(date.seq)<-'week.date' #make sure column name is 'date'
+d2 <- d2[!is.na(d2$week.date),] #removes cases with missing date information
 
-#Merge together the empty dataset with just the dates and the original data
-d4<- merge(d2, date.seq, all=T, by='week.date')
-names(d4)<-c('week.date', 'a00_a09')
+d2 <- as.data.frame(d2) #convert d2 to a data frame from a tibble
 
-#for any weeks that were not present in original data, assign a count of 0.
-d4$a00_a09[is.na(d4$a00_a09)] <- 0
-
-#write.csv(d4,'d4.csv') #can save a copy of the dataset if you want
-
-```
-
-*Dataset d4 will be used in all further analyses. If you got stuck prior to this, go ahead and read in and use the pre-formatted dataset 'd4.csv'*
-```{r}
-#d4<- read.csv('d4.csv') #Only run this if you were not able to complete previous steps
 ```
 
 
 ```{r}
-plot(d4$week.date, d4$a00_a09, type='l', bty='l', ylab='Cases A00-A09')
+head(d2)
 ```
 
-OK for now let's pretend that we want to detect aberrations in 2009. We can subset the data to only include dates through end of 2009
 ```{r}
-d5<-d4[d4$week.date<=as.Date('2007-12-31'),]
-```
-
-
-Plot the time series
-
-```{r}
-p1 <- ggplot(d5 , aes(x=week.date, y=a00_a09)) +
+p1 <- ggplot(d2, aes(x=week.date, y=a00_a09)) +
   geom_line() +
-  theme_classic() 
+  theme_classic()
 
-p1 
+p1
 ```
+
 
 
 ## Now let's test out our detection algorithms in the surveillance package
@@ -176,19 +157,19 @@ Need to determine the year and week of the first data Can use week(date) and yea
 
 ```{r}
 # a00_DP <- create.disProg(
-#       week = 1:nrow(d5), #Index of observations
-#       observed = d5$a00_a09 ,
+#       week = 1:nrow(d2), #Index of observations
+#       observed = d2$a00_a09 ,
 #       state=matrix(0, nrow=nrow(d4), ncol=1),
 #       start = c(2000, 53))
 ```
 
-Let's look for aberrations during the 2007 calendar years first, then see how it performs for 2008-2011 Need to  first determine indexes for thise year
+Let's look for aberrations during the 2007 calendar years first (weeks 314-365), then see how it performs for 2008-2011 
 
 Let's try historical limits with default threshold
 
 
 ```{r}
-app.hist.limit(ds=d5, datevar='week.date', casevar='a00_a09')
+app.hist.limit(ds=d2, datevar='week.date', casevar='a00_a09')
 
 ```
 
@@ -197,18 +178,20 @@ QUESTIONS to consider
 2. What happens if you include fewer or more 4 week periods on either side?
 
 
+## Farrington
+Let's look for aberrations during the 2007 calendar years first (weeks 314-365), then see how it performs for 2008-2011 
+
 ```{r hist.limits2}
-FarringtonApp(ds=d5, datevar='week.date', casevar='a00_a09')
+FarringtonApp(ds=d2, datevar='week.date', casevar='a00_a09')
 ```
 
-Ok let's look forward now a
 QUESTIONS to consider
 1. There is a drop in cases apparent in the data in the last couple of years. How does this affect the algorithms?
 2. How important is the reweighting for the Farrington algorithm?
 3. What happens if use more or fewer years of historical data for Farrington?
 
 
-## Control chart methods
+## Control chart (CUSUM-type) methods
 QUESTIONS to consider
 
 - What are the issues with the ft of the model/
@@ -219,13 +202,13 @@ QUESTIONS to consider
 -- How might we further improve this approach?
 
 ```{r}
-glrpois_App(ds=d5, datevar='week.date', casevar='a00_a09', n.weeks.train=53)
+glrpois_App(ds=d2, datevar='week.date', casevar='a00_a09', n.weeks.train=53)
 
 ```
 
 Try to use a longer training period (used to fit seasonal component, trend, and estimate dispersion parameter for negative binomial model)
 ```{r}
-glrpois_App(ds=d5, datevar='week.date', casevar='a00_a09', n.weeks.train=106)
+glrpois_App(ds=d2, datevar='week.date', casevar='a00_a09', n.weeks.train=106)
 
 ```
 
