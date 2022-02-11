@@ -42,6 +42,7 @@ You have been provided with a subset of the larger database that includes ICD10 
 
 ```{r readscsv}
 d1<-read.csv('./Data/chile_under5y_aCHAPTER.csv')
+#d1 <- d1[d1$EDAD %in% c(3,4),]
 ```
 
 ## Tell R that 'date' is a date variable and assign a format
@@ -212,5 +213,9 @@ glrpois_App(ds=d2, datevar='week.date', casevar='a00_a09', n.weeks.train=106)
 
 ```
 
+
+## Now try with just preschool-aged children (EDAD=3,4)
+
+Does this change how you set any of your parameters?
 
 
