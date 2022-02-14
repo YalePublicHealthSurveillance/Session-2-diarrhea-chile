@@ -1,7 +1,7 @@
 ---
 title: "chile-aberration"
 author: "Dan Weinberger"
-date: "February 4, 2019"
+date: "February 13, 2022"
 output:
   word_document: default
   html_document: default
@@ -93,6 +93,7 @@ icd10.3digits<-substr(d1$diag1,1,3) #extract 1st 3 digits from IC10 code
 icd10.3digits[1:10] #view first 10
 
 ```
+
 Look at their frequency
 ```{r}
 sort(table(icd10.3digits),decreasing=T)

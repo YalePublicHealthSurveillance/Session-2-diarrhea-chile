@@ -9,7 +9,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
       sliderInput("week.test", "Current Week:",
                   min=(n.weeks.train+15), max=nrow(ds), value=(n.weeks.train+15), step=1),
       sliderInput("set.thresh", "Threshold for alarm (default=5):",
-                  min=3, max=10, value=5),
+                  min=1, max=10, value=5),
       selectInput('adjust.season', 'Adjust seasonality?', selected='1 seasonal term', choices=c('No adjustment', '1 seasonal term', '2 seasonal terms')  ),
       checkboxInput('adjust.trend', 'Adjust trend?', value=F ),
       checkboxInput('fit.negbin', 'Use negative binomial instead of Poisson?', value=F ),
@@ -44,7 +44,7 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
           ))
       }
         
-        glr.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$upperbound[,1] )
+        glr.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$upperbound )
         m.vec<- c(rep(NA, times=(mod1$control$range[1]-1)),mod1$control$mu0 )
         
         alarm.vec<- c(rep(1, times=(mod1$control$range[1]-1)),mod1$alarm+2 )
@@ -59,7 +59,8 @@ glrpois_App <-function(ds=ds1, datevar='date', casevar='cases', n.weeks.train=53
         points(ds[1:length(m.vec),datevar],m.vec, type='l', col='black')
         title('Observed cases and mean')
         
-        plot(ds[1:length(glr.vec),datevar],glr.vec, bty='l',type='p', ylab='GLR statistic',col=col.alarm.vec[alarm.vec], pch=16, xlim=c(min(ds[,datevar]),max(ds[,datevar]) ))
+        plot(ds[1:length(glr.vec),datevar],glr.vec, bty='l',type='p', ylab='GLR statistic',col=col.alarm.vec[alarm.vec], pch=16, xlim=c(min(ds[,datevar]),max(ds[,datevar]) ), 
+              ylim=c(0, max(6,max(glr.vec, na.rm=T))))
         abline(h=mod1$control$c.ARL, lty=2)
         title('GLR statistic')
         
