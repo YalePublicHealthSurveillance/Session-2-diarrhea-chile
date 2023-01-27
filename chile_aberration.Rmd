@@ -5,12 +5,10 @@ date: "January 30, 2023"
 output:
   word_document: default
   html_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
-
-##Getting started
-1) Save this .Rmd file and any data files (e.g., .csv files) in the same directory
-2) Make sure you have the packages installed listed in the chunk below
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -22,6 +20,7 @@ library(tidyr)
 library(dplyr)
 library(zoo)
 library(plotly)
+library(table1)
 
 source('./R/App_Hist_limit.R')
 source('./R/FarringtonApp.R')
@@ -31,15 +30,212 @@ source('./R/surv.ds.convert.R')
 
 ##Goal for the exercise
 
-Today, we will set up an aberration detection algorithm for diarrheal disease among children <5y in Chile (population 18 Million). We will first format and explore the data and will then  test out a few different algorithms and decide on the most appropriate. Administrative hospitalization data for Chile are publicly available on the Ministry of Health Website. Variables included in this parsed down database are:
+1. Exploring and cleaning ICD10-coded data, preparing time series using mortality data from the US and hospitalization data in Chile
 
-EDAD: age in years
-diag1: primary diagnosis, in ICD10 coding
-date: Date admitted to hospital 
+2. Set up an aberration detection algorithm
 
-You have been provided with a subset of the larger database that includes ICD10 codes that start with the letter "A" (certain infectious diseases). We can learn more about the ICD10 codes here: https://www.icd10data.com/ICD10CM/Codes/A00-B99
+## Section 1: US mortality data
 
-### First read in the data 
+
+## Lets practice with mortality data
+
+This is a random 1 percent sample of US mortality data
+```{r}
+a1 <- readRDS('./Data/mortality_1percent.rds')
+```
+
+See just first few rows
+```{r}
+a1 %>% slice_head(n=10)
+```
+
+```{r}
+names(a1)
+```
+
+
+Let's format a date variable using the month and year as inputs
+
+Here we are going to use **pipes** to work with the data. a Pipe is denoted with a %\>%. It is saying that we want to create a new data frame called 'd2'. We are starting with data frame d1 and then adding onto it (mutating). We could also just overwrite d1 with the updated dataframe by writing d1 \<- d1 %\>%...
+
+Creating dates is complicated. We first paste together the year and month columns from the data frame and append an '01', separating each with a '-'. paste(year, month, '01', sep='-') This then has the format YYYY-MM-DD. But this is a character variable..we have to declare the variable as a Date and tell R what the format is as.Date(x, '%Y-%m-%d')) %Y is 4 digit year (%y would be 2 digit year), %m is 2 digit month (%b would be 3 character month abbreviation), and %d for 2 digit day. This could all be done in a single step, but we will break it in 2 here
+
+```{r}
+
+a2 <- a1 %>%
+  mutate( monthdate =paste(year, month, '01', sep='-'), 
+          monthdate = as.Date(monthdate, '%Y-%m-%d') )
+
+#'%Y/%m/%d'
+#'%m/%d/%Y'
+
+
+```
+
+We can see here that the variable was created correctly
+
+```{r}
+str(a2)
+```
+
+
+We can get some summary stats easily using the Table1 package
+
+```{r}
+table1(~ agey + race_recode + sex, data=a2)
+```
+
+We can spot a few issues here. first, age has a large range. That is because missing values are stored as 999. We should replace this with NA. age race_recode and sex should be stored as factor variables because they represent categories
+
+```{r}
+a2 <- a1 %>%
+  mutate(
+         monthdate = as.Date(paste(year, month, '01', sep='-'), '%Y-%m-%d'), #format date as a date variable
+         race_recode= factor(race_recode, levels=c(1,2,3,4,5), c('White','Black','Hispanic','American Indian', 'Asian/Pacific Islanders')) , #converts race to a factor
+         sex= as.factor(sex), #define sex as a factor
+         agey = if_else(agey>120,NA_real_, agey) #set age to missing if>120
+         )
+```
+
+```{r}
+table1(~agey + race_recode + sex, data=a2)
+```
+
+Plot of age distribution of deaths
+
+```{r}
+ggplot(a2, aes(x=agey)) + 
+  geom_histogram(binwidth=1) +
+  theme_classic() + #makes it look pretty
+    xlab('Age (years)')+ #x axis label
+   ggtitle('Age Distribution of Deaths')
+
+```
+
+As a test case, let's search for any deaths with COPD (J44) listed as the underlying OR contributing cause of death (search all of the ICD fields). Remember this is a 1% sample
+
+```{r}
+
+
+a3 <-a2 %>% 
+  unite('all_icd', starts_with('icd')) %>% #paste all columns that start with 'icd' into a single column
+  mutate( J44 = if_else(grepl('J44', all_icd),1,0 ) )%>% #grepl search the variable 'all_icd', if it finds it, return a 1 
+  filter(J44==1)  #filter to just J13-containing deaths
+
+View(a3)
+```
+
+Instead, format into a monthly time series
+```{r}
+a3_ts <-a2 %>% 
+  unite('all_icd', starts_with('icd')) %>% #paste all columns that start with 'icd' into a single column
+  mutate( J44 = if_else(grepl('J44', all_icd),1,0 ) ) %>% #grepl search the variable 'all_icd', if it finds it, return a 1 
+  group_by(monthdate) %>% #count events by monthdate
+  summarize(J44=sum(J44), N_all_cause=n())
+  
+View(a3_ts)
+```
+
+```{r}
+ggplot(a3_ts, aes(x=monthdate, y=J44))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA)
+
+ggplot(a3_ts, aes(x=monthdate, y=N_all_cause))+
+  geom_line()+
+  theme_classic()+
+  ylim(0,NA)
+```
+Now let's plot all-cause deaths, by age group.
+
+1.  Create a variable denoting age category (agec)
+2.  Group the dataframe by agec and monthdate (group_by(agec, monthdate))
+3.  Count the number of rows in each group
+4.  Make sure all combinations of agec and monthdate are represented (filled time series)
+5.  Ungroup the dataset
+
+```{r}
+a4 <- a2 %>%
+  mutate(agec = if_else( agey>=0 & agey<5,1,
+                if_else(agey>=5 & agey<18,2,
+                if_else(agey>=18 & agey<65,3,
+                if_else(agey>=65 & agey<80,4,
+                if_else(agey>=80 & agey<120,5,999
+                            ))))),
+         agec=as.factor(agec)
+         ) %>%
+  group_by(agec, monthdate) %>%
+  summarize(N_deaths = n()) %>% # Step 3
+  #tidyr::complete(agec, monthdate, fill=list(N_deaths=0)) %>% # Step 4
+  ungroup() %>%#Step 5
+  filter(!is.na(agec)) %>% #if agec is missing, remove
+   unique() #remove duplicate rows
+
+```
+
+Check your work--we should have same number of rows per group
+
+```{r}
+a4 %>% 
+  group_by(agec) %>% 
+  summarize(N_dates=n())
+```
+
+### Make some plots
+
+This looks terrible...this is because we haven't told R how to group the data
+
+```{r}
+ggplot(a4, aes(x=monthdate, y=N_deaths)) +
+  geom_line()
+
+
+```
+
+That didn't work because we didn't tell ggplot that we have multiple observations per time point (by agec)
+
+```{r}
+ggplot(a4, aes(x=monthdate, y=N_deaths, group=agec, color=agec)) +
+  geom_line()+
+  theme_classic()
+```
+
+Facet wrap to separate out by column. 'free_y' allows each panel to have its own y axis
+
+```{r, fig.width=7, fig.height=2}
+ggplot(a4, aes(x=monthdate, y=N_deaths, group=agec, color=agec)) +
+  geom_line() +
+  theme_classic() +
+  facet_wrap(~agec, scales='free_y', nrow=1)
+```
+
+To force the Y axis to 0, set ylim(0,NA), this means bottom must be 0, top goes to whatever max of the data is for that group.
+
+```{r, fig.width=7, fig.height=2}
+ggplot(a4, aes(x=monthdate, y=N_deaths, group=agec, color=agec)) +
+  geom_line() +
+  theme_classic() +
+  facet_wrap(~agec, scales='free_y', nrow=1)+
+  ylim(0, NA)
+```
+
+## Section 2: Aberration detection for diarrheal disease in Chile
+
+In this section, we will set up an aberration detection algorithm for diarrheal disease among children \<5y in Chile (population 18 Million). We will first format and explore the data and will then test out a few different
+algorithms and decide on the most appropriate. Administrative
+hospitalization data for Chile are publicly available on the Ministry of Health Website. Variables included in this parsed down database are:
+
+EDAD: age in years 
+diag1: primary diagnosis, in ICD10 coding 
+date: Date admitted to hospital
+
+You have been provided with a subset of the larger database that
+includes ICD10 codes that start with the letter "A" (certain infectious
+diseases). We can learn more about the ICD10 codes here:
+<https://www.icd10data.com/ICD10CM/Codes/A00-B99>
+
+### First read in the data
 
 ```{r readscsv}
 d1<-read.csv('./Data/chile_under5y_aCHAPTER.csv')
@@ -48,28 +244,40 @@ d1<-read.csv('./Data/chile_under5y_aCHAPTER.csv')
 
 ## Tell R that 'date' is a date variable and assign a format
 
-see https://www.statmethods.net/input/dates.html
-The data are initially in the format day f the month, 3 digit month, 4 difit year. We need to convert this to a date format in R. 
+see <https://www.statmethods.net/input/dates.html> The data are
+initially in the format day f the month, 3 digit month, 4 difit year. We
+need to convert this to a date format in R.
 
 ```{r date_format}
 d1$date[1:10]
 ```
 
-We can do this with a as.Date function in R. %d means 2 digit day of month, %b means we have a 3 digit month, and %Y means we have a 4 digit month. If you had a 2 digit date, you would use a lower case y. If you had dashes or slashed, you would include them in he format statement. For instance 01-Dec-2010 would be "%d-%b-%Y". Or if you had 01/12/19 (day/month/year), the format would be "%d/%m/%y" (note the lower case y because it is a 2 digit month)
+We can do this with a as.Date function in R. %d means 2 digit day of
+month, %b means we have a 3 digit month, and %Y means we have a 4 digit
+month. If you had a 2 digit date, you would use a lower case y. If you
+had dashes or slashed, you would include them in he format statement.
+For instance 01-Dec-2010 would be "%d-%b-%Y". Or if you had 01/12/19
+(day/month/year), the format would be "%d/%m/%y" (note the lower case y
+because it is a 2 digit month)
+
 ```{r}
 d1$date<- as.Date(d1$date, format="%d%b%Y")
 d1$date[1:10]
 ```
 
-Then create a new variable called 'week.date' that has the date of the Sunday of the week in which the admission occurred. The lubridate has some functions that make this easier. You want to round the date down to the nearest Sunday. The floor_data function can accomplish this: https://rawgit.com/rstudio/cheatsheets/master/lubridate.pdf
+Then create a new variable called 'week.date' that has the date of the
+Sunday of the week in which the admission occurred. The lubridate has
+some functions that make this easier. You want to round the date down to
+the nearest Sunday. The floor_data function can accomplish this:
+<https://rawgit.com/rstudio/cheatsheets/master/lubridate.pdf>
 
 ```{r date_format2}
 #"round" the date down to 
 d1$week.date <- floor_date(d1$date, unit='week')
 ```
 
-
 ### Then do some basic explorations. What is the distibution of ages? of Dates? (make a histogram for each)
+
 ```{r hist1}
 hist(d1$EDAD)
 ```
@@ -78,15 +286,19 @@ hist(d1$EDAD)
 hist(d1$date, breaks=10)
 ```
 
+### Which ICD10 codes are the most commonly used in this database?
 
-### Which ICD10 codes are the most commonly used in this databse?
-Make a table of the codes, sorted most to least common. To figure out what these codes mean, look at an ICD10 dictionary online like  https://www.icd10data.com/ICD10CM/Codes/A00-B99
+Make a table of the codes, sorted most to least common. To figure out
+what these codes mean, look at an ICD10 dictionary online like
+<https://www.icd10data.com/ICD10CM/Codes/A00-B99>
 
 ```{r freq.codes, echo=FALSE}
 sort(table(d1$diag1),decreasing=T)[1:50]
 ```
 
-It is sometimes more useful to look at broader categories. You can do this by looking at the first 3 digits of the ICD10 code
+It is sometimes more useful to look at broader categories. You can do
+this by looking at the first 3 digits of the ICD10 code
+
 ```{r}
 
 icd10.3digits<-substr(d1$diag1,1,3) #extract 1st 3 digits from IC10 code
@@ -96,11 +308,13 @@ icd10.3digits[1:10] #view first 10
 ```
 
 Look at their frequency
+
 ```{r}
 sort(table(icd10.3digits),decreasing=T)
 ```
 
 Now create flags for diarrheal disease codes (A00-A09)
+
 ```{r}
 d1$a00_a09 <- 0 #Initialize variables
 
@@ -110,12 +324,15 @@ d1$a00_a09[icd10.3digits %in% c('A00', 'A01', 'A02', 'A03', 'A04', 'A05', 'A06',
 ```
 
 #Check your work
+
 ```{r}
 table(d1$a00_a09, d1$diag1)
 ```
 
 ## Let's aggregate the A00-A09 codes by week.date
--We sum the 0/1 variable we created for A00-A09 by date. this counts the number of cases per time period. Here we are using 'pipes'
+
+-We sum the 0/1 variable we created for A00-A09 by date. this counts the
+number of cases per time period. Here we are using 'pipes'
 
 ```{r}
 
@@ -126,9 +343,13 @@ d2 <- d1 %>% #creating a new data frame called 'd2', input data frame d1
   filter(!is.na(week.date))
 ```
 
-It is important to ensure that all weeks are represented in the dataset, even if there are 0 counts. This can be done using the complete() function. This could be modified if there are multiple groups.  For example:
+It is important to ensure that all weeks are represented in the dataset,
+even if there are 0 counts. This can be done using the complete()
+function. This could be modified if there are multiple groups. For
+example:
 
-  tidyr::complete(**agec**, week.date=seq.Date(min(week.date, na.rm=T), max(week.date, na.rm=T), 'week'), fill=list(a00_a09=0)) #fills 0s
+tidyr::complete(**agec**, week.date=seq.Date(min(week.date, na.rm=T),
+max(week.date, na.rm=T), 'week'), fill=list(a00_a09=0)) #fills 0s
 
 ```{r}
 d2<- d2 %>%
@@ -139,7 +360,6 @@ d2 <- d2[!is.na(d2$week.date),] #removes cases with missing date information
 d2 <- as.data.frame(d2) #convert d2 to a data frame from a tibble
 
 ```
-
 
 ```{r}
 head(d2)
@@ -153,7 +373,6 @@ p1 <- ggplot(d2, aes(x=week.date, y=a00_a09)) +
 p1
 ```
 
-
 ## Now do same thing by age group
 
 ```{r}
@@ -165,7 +384,8 @@ d2_age <-  d1 %>% #creating a new data frame called 'd2', input data frame d1
 
 ```
 
-Seems to be something funky in age 2. It seems there is a miscoding of ages in 1 calendar year.
+Seems to be something funky in age 2. It seems there is a miscoding of
+ages in 1 calendar year.
 
 ```{r}
 p1 <- ggplot(d2_age, aes(x=week.date, y=a00_a09)) +
@@ -178,10 +398,10 @@ p1
 ggplotly(p1)
 ```
 
-
 ## This can all be done in a single pipe
 
-This will be important down the road when we are considering making things interactive with Shiny
+This will be important down the road when we are considering making
+things interactive with Shiny
 
 ```{r}
 d2_age <-  read.csv('./Data/chile_under5y_aCHAPTER.csv') %>% #creating a new data frame called 'd2', input data frame d1
@@ -208,18 +428,16 @@ d2_age <-  read.csv('./Data/chile_under5y_aCHAPTER.csv') %>% #creating a new dat
 ggplotly(p1)
 ```
 
-
 ## Now let's test out our detection algorithms in the surveillance package
 
 Subset to age group 2
+
 ```{r}
 d2_age2 <- d2_age %>% 
   filter(EDAD==2 & !is.na(agg.date)) %>%
   select(agg.date, a00_a09) %>%
   as.data.frame()
 ```
-
-
 
 ```{r}
 # a00_DP <- create.disProg(
@@ -229,41 +447,42 @@ d2_age2 <- d2_age %>%
 #       start = c(2000, 53))
 ```
 
-Let's look for aberrations during the 2007 calendar years first (weeks 314-365), then see how it performs for 2008-2011 
+Let's look for aberrations during the 2007 calendar years first (weeks
+314-365), then see how it performs for 2008-2011
 
 Let's try historical limits with default threshold
-
 
 ```{r}
 app.hist.limit(ds=d2_age2, datevar='agg.date', casevar='a00_a09')
 
 ```
 
-QUESTIONS to consider
-1. What happens if use adjust alpha up or down?
-2. What happens if you include fewer or more 4 week periods on either side?
-
+QUESTIONS to consider 1. What happens if use adjust alpha up or down? 2.
+What happens if you include fewer or more 4 week periods on either side?
 
 ## Farrington
-Let's look for aberrations during the 2007 calendar years first (weeks 314-365), then see how it performs for 2008-2011 
+
+Let's look for aberrations during the 2007 calendar years first (weeks
+314-365), then see how it performs for 2008-2011
 
 ```{r hist.limits2}
 FarringtonApp(ds=d2_age2, datevar='agg.date', casevar='a00_a09')
 ```
 
-QUESTIONS to consider
-1. There is a drop in cases apparent in the data in the last couple of years. How does this affect the algorithms?
-2. How important is the reweighting for the Farrington algorithm?
-3. What happens if use more or fewer years of historical data for Farrington?
-
+QUESTIONS to consider 1. There is a drop in cases apparent in the data
+in the last couple of years. How does this affect the algorithms? 2. How
+important is the reweighting for the Farrington algorithm? 3. What
+happens if use more or fewer years of historical data for Farrington?
 
 ## Control chart (CUSUM-type) methods
+
 QUESTIONS to consider
 
-- What are the issues with the ft of the model/
-- What if you add additional seasonal (Fourier) terms?
-- What if you use a negative binomial threshold model to calculate the likelihood ratio?
-- How would you set the threshold here?
+-   What are the issues with the ft of the model/
+-   What if you add additional seasonal (Fourier) terms?
+-   What if you use a negative binomial threshold model to calculate the
+    likelihood ratio?
+-   How would you set the threshold here?
 
 -- How might we further improve this approach?
 
@@ -272,12 +491,12 @@ glrpois_App(ds=d2_age2, datevar='agg.date', casevar='a00_a09', n.weeks.train=53)
 
 ```
 
-Try to use a longer training period (used to fit seasonal component, trend, and estimate dispersion parameter for negative binomial model)
+Try to use a longer training period (used to fit seasonal component,
+trend, and estimate dispersion parameter for negative binomial model)
+
 ```{r}
 glrpois_App(ds=d2_age2, datevar='agg.date', casevar='a00_a09', n.weeks.train=106)
 
 ```
-
-
 
 
